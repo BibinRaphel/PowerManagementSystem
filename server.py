@@ -8,6 +8,7 @@ HTML_PAGE = """
 <html>
 <head>
     <title>Energy Monitor Dashboard</title>
+    <meta charset="UTF-8">
     <style>
         body { font-family: Arial; padding: 20px; background: #f0f0f0; }
         h1 { color: #333; }
@@ -15,6 +16,12 @@ HTML_PAGE = """
         th, td { padding: 8px 12px; border: 1px solid #ccc; text-align: center; }
         th { background-color: #f9b234; color: white; }
     </style>
+    <script>
+        // Refresh the page every 5 seconds
+        setTimeout(function(){
+            window.location.reload();
+        }, 5000);
+    </script>
 </head>
 <body>
     <h1>Energy Monitor Dashboard</h1>
@@ -47,6 +54,9 @@ def upload():
     content = request.get_json()
     if isinstance(content, list):
         data_log.extend(content)
+        # Keep only the latest 15 entries
+        if len(data_log) > 15:
+            del data_log[:-15]
     return jsonify({"status": "received", "entries": len(content)})
 
 if __name__ == '__main__':

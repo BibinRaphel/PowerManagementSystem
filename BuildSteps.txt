@@ -4,10 +4,10 @@ Installing modules
 3. pip install flask
 
 Compiling Code
-1. gcc logger.c -lsqlite3 -o logger
-2. gcc client_upload.c -lsqlite3 -lcurl -o uploader
+1. gcc logger.c -lsqlite3 -o logger -lcurl
+2. gcc query_latest.c -o query_latest -lsqlite3
 
 Execution
 1. python3 server.py
 2. ./logger
-3. ./uploader
+3. ./query_latest
