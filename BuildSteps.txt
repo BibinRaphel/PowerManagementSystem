@@ -1,0 +1,13 @@
+Installing modules
+1. Install GCC - sudo apt install build-essential -y
+2. Install sqlite3 - sudo apt install sqlite3 libsqlite3-dev
+3. pip install flask
+
+Compiling Code
+1. gcc logger.c -lsqlite3 -o logger
+2. gcc client_upload.c -lsqlite3 -lcurl -o uploader
+
+Execution
+1. python3 server.py
+2. ./logger
+3. ./uploader
