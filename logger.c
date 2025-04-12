@@ -9,7 +9,10 @@
 #include <curl/curl.h>
 
 #define TOTAL_DEVICES 3
-#define MAX_ENTRIES   15  // Change this to keep more or fewer entries in DB
+#define MAX_ENTRIES   15        // Max entries to retain in DB
+#define MAX_RETRIES   3         // Max retries for sending data
+#define SENSOR_MIN    100       // Simulated min valid sensor value
+#define SENSOR_MAX    400       // Simulated max valid sensor value
 
 const char* get_timestamp()
 {
@@ -19,61 +22,81 @@ const char* get_timestamp()
     return buffer;
 }
 
+bool is_sensor_connected(float power)
+{
+    return (power >= SENSOR_MIN && power <= SENSOR_MAX);
+}
+
+bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy)
+{
+    const char *sql = "INSERT INTO energy_data (timestamp, appliance_id, power_consumption, cumulative_energy) VALUES (?, ?, ?, ?);";
+    sqlite3_stmt *stmt;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error (prepare): %s\n", sqlite3_errmsg(db));
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, get_timestamp(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, appliance_id);
+    sqlite3_bind_double(stmt, 3, power);
+    sqlite3_bind_double(stmt, 4, energy);
+
+    bool success = true;
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+    {
+        fprintf(stderr, "Insert failed: %s\n", sqlite3_errmsg(db));
+        success = false;
+    }
+
+    sqlite3_finalize(stmt);
+    return success;
+}
+
 void insert_data(sqlite3 *db)
 {
     for (int idx = 0; idx < TOTAL_DEVICES; idx++)
     {
-        const char *sql = "INSERT INTO energy_data (timestamp, appliance_id, power_consumption, cumulative_energy) VALUES (?, ?, ?, ?);";
-        sqlite3_stmt *stmt;
+        float power = (float)(rand() % 450);  // Includes possibility of faulty sensor (>400)
+        float energy = power * 0.001f;
 
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        if (!is_sensor_connected(power))
         {
-            fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
-            return;
+            fprintf(stderr, "Sensor %d disconnected or faulty: Power reading = %.2f W\n", idx, power);
+            continue;
         }
 
-        float power = (float)(rand() % 300 + 100);  // 100W to 400W
-        float energy = power * 0.001f;              // Simulated cumulative energy
-
-        sqlite3_bind_text(stmt, 1, get_timestamp(), -1, SQLITE_STATIC);
-        sqlite3_bind_int(stmt, 2, idx);
-        sqlite3_bind_double(stmt, 3, power);
-        sqlite3_bind_double(stmt, 4, energy);
-
-        if (sqlite3_step(stmt) != SQLITE_DONE)
-        {
-            fprintf(stderr, "Insert failed: %s\n", sqlite3_errmsg(db));
-        }
-        else
+        if (insert_device_data(db, idx, power, energy))
         {
             printf("Time: %s | Appliance ID: %d | Power: %.2f W | Energy: %.3f kWh\n",
                    get_timestamp(), idx, power, energy);
         }
-
-        sqlite3_finalize(stmt);
     }
 }
 
-void send_data_to_server(const char *json)
+bool send_data_to_server(const char *json)
 {
     CURL *curl = curl_easy_init();
-    if (curl)
+    if (!curl) return false;
+
+    struct curl_slist *headers = curl_slist_append(NULL, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:5000/upload");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json);
+
+    CURLcode res = curl_easy_perform(curl);
+    bool success = (res == CURLE_OK);
+
+    if (!success)
     {
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-
-        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:5000/upload");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json);
-
-        CURLcode res = curl_easy_perform(curl);
-        if (res != CURLE_OK)
-        {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        }
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(headers);
+        fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
     }
+
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    return success;
 }
 
 void fetch_and_send(sqlite3 *db)
@@ -106,7 +129,20 @@ void fetch_and_send(sqlite3 *db)
     strcat(json, "]");
     sqlite3_finalize(stmt);
 
-    send_data_to_server(json);
+    // Retry mechanism for failed network transmission
+    for (int attempt = 1; attempt <= MAX_RETRIES; ++attempt)
+    {
+        if (send_data_to_server(json))
+        {
+            printf("Data sent successfully (Attempt %d).\n", attempt);
+            return;
+        } else {
+            fprintf(stderr, "Retrying to send data (Attempt %d)...\n", attempt);
+            sleep(2);  // wait before retry
+        }
+    }
+
+    fprintf(stderr, "Failed to send data after %d attempts.\n", MAX_RETRIES);
 }
 
 void keep_latest_entries(sqlite3 *db)
@@ -152,12 +188,11 @@ int main() {
 
     printf("Starting data logger... Press Ctrl+C to stop.\n");
 
-    while (true)
-    {
-        insert_data(db);          // Inser to Database
-        fetch_and_send(db);       // Update Web Server
-        keep_latest_entries(db);  // Clean up old rows
-        sleep(5);                 // log every 5 seconds
+    while (true) {
+        insert_data(db);
+        fetch_and_send(db);
+        keep_latest_entries(db);
+        sleep(5);
     }
 
     sqlite3_close(db);
