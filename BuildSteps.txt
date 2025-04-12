@@ -4,11 +4,12 @@ Installing modules
 3. pip install flask
 
 Compiling Code
-1. sqlite3 energy.db < energy_schema.sql
-2. gcc logger.c -lsqlite3 -o logger -lcurl
-3. gcc query_latest.c -o query_latest -lsqlite3
+1. mkdir .build
+2. sqlite3 .build/energy.db < sql/energy_schema.sql
+3. gcc logger/logger.c -lsqlite3 -o .build/logger -lcurl
+4. gcc user_query/query_latest.c -o .build/query_latest -lsqlite3
 
 Execution
-1. python3 server.py
-2. ./logger
-3. ./query_latest
+1. python3 server/server.py
+2. ./.build/logger
+3. ./.build/query_latest

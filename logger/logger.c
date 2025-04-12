@@ -203,7 +203,7 @@ int main()
     sqlite3 *db;
     srand(time(NULL));
 
-    if (sqlite3_open("energy.db", &db))
+    if (sqlite3_open(".build/energy.db", &db))
     {
         fprintf(stderr, "Database open error: %s\n", sqlite3_errmsg(db));
         return 1;

@@ -2,12 +2,14 @@
 #include <stdio.h>
 #include <sqlite3.h>
 
-int main() {
+int main()
+{
     sqlite3 *db;
     sqlite3_stmt *stmt;
 
     // Open the SQLite database
-    if (sqlite3_open("energy.db", &db)) {
+    if (sqlite3_open(".build/energy.db", &db))
+    {
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
         return 1;
     }
@@ -20,7 +22,8 @@ int main() {
         "   SELECT MAX(id) FROM energy_data GROUP BY appliance_id"
         ") ORDER BY appliance_id;";
 
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+    {
         fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
         sqlite3_close(db);
         return 1;
@@ -31,7 +34,8 @@ int main() {
     printf("| Timestamp           | Appliance | Power (W) | Energy (kWh) |     Status      |\n");
     printf("-------------------------------------------------------------------------------------\n");
 
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
         const char *timestamp = (const char *)sqlite3_column_text(stmt, 0);
         int appliance_id = sqlite3_column_int(stmt, 1);
         double power = sqlite3_column_double(stmt, 2);
