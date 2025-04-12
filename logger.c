@@ -4,15 +4,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <sqlite3.h>
-#include <stdbool.h>
 #include <string.h>
 #include <curl/curl.h>
+#include <stdbool.h>
 
 #define TOTAL_DEVICES 3
 #define MAX_ENTRIES   15        // Max entries to retain in DB
 #define MAX_RETRIES   3         // Max retries for sending data
-#define SENSOR_MIN    100       // Simulated min valid sensor value
-#define SENSOR_MAX    400       // Simulated max valid sensor value
+#define SENSOR_MIN    100       // Simulated min valid sensor power value
+#define SENSOR_MAX    400       // Simulated max valid sensor power value
 
 const char* get_timestamp()
 {
@@ -43,11 +43,10 @@ bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy
     sqlite3_bind_double(stmt, 3, power);
     sqlite3_bind_double(stmt, 4, energy);
 
-    bool success = true;
-    if (sqlite3_step(stmt) != SQLITE_DONE)
+    bool success = sqlite3_step(stmt) == SQLITE_DONE;
+    if (!success)
     {
         fprintf(stderr, "Insert failed: %s\n", sqlite3_errmsg(db));
-        success = false;
     }
 
     sqlite3_finalize(stmt);
@@ -58,18 +57,18 @@ void insert_data(sqlite3 *db)
 {
     for (int idx = 0; idx < TOTAL_DEVICES; idx++)
     {
-        float power = (float)(rand() % 450);  // Includes possibility of faulty sensor (>400)
+        float power = (float)(rand() % 450);  // Simulated range, with error chance
         float energy = power * 0.001f;
 
         if (!is_sensor_connected(power))
         {
-            fprintf(stderr, "Sensor %d disconnected or faulty: Power reading = %.2f W\n", idx, power);
+            fprintf(stderr, "Sensor %d disconnected: Power = %.2f W\n", idx, power);
             continue;
         }
 
         if (insert_device_data(db, idx, power, energy))
         {
-            printf("Time: %s | Appliance ID: %d | Power: %.2f W | Energy: %.3f kWh\n",
+            printf("Time: %s | Appliance: %d | Power: %.2f W | Energy: %.3f kWh\n",
                    get_timestamp(), idx, power, energy);
         }
     }
@@ -88,7 +87,6 @@ bool send_data_to_server(const char *json)
 
     CURLcode res = curl_easy_perform(curl);
     bool success = (res == CURLE_OK);
-
     if (!success)
     {
         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -129,16 +127,17 @@ void fetch_and_send(sqlite3 *db)
     strcat(json, "]");
     sqlite3_finalize(stmt);
 
-    // Retry mechanism for failed network transmission
     for (int attempt = 1; attempt <= MAX_RETRIES; ++attempt)
     {
         if (send_data_to_server(json))
         {
             printf("Data sent successfully (Attempt %d).\n", attempt);
             return;
-        } else {
-            fprintf(stderr, "Retrying to send data (Attempt %d)...\n", attempt);
-            sleep(2);  // wait before retry
+        }
+        else
+        {
+            fprintf(stderr, "Retrying send (Attempt %d)...\n", attempt);
+            sleep(2);
         }
     }
 
@@ -149,8 +148,7 @@ void keep_latest_entries(sqlite3 *db)
 {
     char sql[256];
     snprintf(sql, sizeof(sql),
-             "DELETE FROM energy_data "
-             "WHERE id NOT IN (SELECT id FROM energy_data ORDER BY id DESC LIMIT %d);",
+             "DELETE FROM energy_data WHERE id NOT IN (SELECT id FROM energy_data ORDER BY id DESC LIMIT %d);",
              MAX_ENTRIES);
 
     char *errmsg = NULL;
@@ -161,9 +159,10 @@ void keep_latest_entries(sqlite3 *db)
     }
 }
 
-int main() {
+int main()
+{
     sqlite3 *db;
-    srand(time(NULL));  // Seed for random generator
+    srand(time(NULL));
 
     if (sqlite3_open("energy.db", &db))
     {
@@ -171,28 +170,14 @@ int main() {
         return 1;
     }
 
-    const char *sql_create =
-        "CREATE TABLE IF NOT EXISTS energy_data ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "timestamp TEXT,"
-        "appliance_id INTEGER,"
-        "power_consumption REAL,"
-        "cumulative_energy REAL);";
+    printf("Energy logger started. Ctrl+C to stop.\n");
 
-    char *errmsg = 0;
-    if (sqlite3_exec(db, sql_create, 0, 0, &errmsg) != SQLITE_OK)
+    while (true)
     {
-        fprintf(stderr, "Table creation error: %s\n", errmsg);
-        sqlite3_free(errmsg);
-    }
-
-    printf("Starting data logger... Press Ctrl+C to stop.\n");
-
-    while (true) {
-        insert_data(db);
-        fetch_and_send(db);
-        keep_latest_entries(db);
-        sleep(5);
+        insert_data(db);          // Inser to Database
+        fetch_and_send(db);       // Update Web Server
+        keep_latest_entries(db);  // Clean up old rows
+        sleep(5);                 // log every 5
     }
 
     sqlite3_close(db);
