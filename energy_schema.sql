@@ -4,5 +4,6 @@ CREATE TABLE IF NOT EXISTS energy_data (
     timestamp TEXT,
     appliance_id INTEGER,
     power_consumption REAL,
-    cumulative_energy REAL
+    cumulative_energy REAL,
+    status TEXT
 );

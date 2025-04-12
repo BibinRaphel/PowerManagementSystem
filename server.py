@@ -31,6 +31,7 @@ HTML_PAGE = """
             <th>Appliance ID</th>
             <th>Power (W)</th>
             <th>Cumulative Energy (kWh)</th>
+            <th>Status</th>
         </tr>
         {% for item in data %}
         <tr>
@@ -38,6 +39,7 @@ HTML_PAGE = """
             <td>{{ item.appliance_id }}</td>
             <td>{{ item.power_consumption }}</td>
             <td>{{ item.cumulative_energy }}</td>
+            <td>{{ item.status }}</td>
         </tr>
         {% endfor %}
     </table>

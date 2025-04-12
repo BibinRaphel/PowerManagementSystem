@@ -8,12 +8,14 @@
 #include <curl/curl.h>
 #include <stdbool.h>
 
-#define TOTAL_DEVICES 3
-#define MAX_ENTRIES   15        // Max entries to retain in DB
-#define MAX_RETRIES   3         // Max retries for sending data
-#define SENSOR_MIN    100       // Simulated min valid sensor power value
-#define SENSOR_MAX    400       // Simulated max valid sensor power value
-
+#define TOTAL_DEVICES           3
+#define MAX_ENTRIES             15        // Max entries to retain in DB
+#define MAX_RETRIES             3         // Max retries for sending data
+#define SENSOR_MIN              10        // Simulated min valid sensor power value
+#define SENSOR_MAX              400       // Simulated max valid sensor power value
+#define NORMAL_OPERATION        0X00      // Normal Operation
+#define OVER_CONSUMPTION        0X01      // Over consumption of power
+#define DEVICE_DISCONNECTED     0X02      // Device Disconnected
 const char* get_timestamp()
 {
     static char buffer[20];
@@ -22,16 +24,33 @@ const char* get_timestamp()
     return buffer;
 }
 
-bool is_sensor_connected(float power)
+int is_sensor_connected(float power)
 {
-    return (power >= SENSOR_MIN && power <= SENSOR_MAX);
+    int powerStaus = 0;
+
+    if(power > SENSOR_MAX)
+    {
+        powerStaus = OVER_CONSUMPTION;
+    }
+    else if(power <= SENSOR_MIN)
+    {
+        powerStaus = DEVICE_DISCONNECTED;
+    }
+    else
+    {
+        powerStaus = NORMAL_OPERATION;
+    }
+
+    return powerStaus;
 }
 
-bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy)
+bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy, const char *status)
 {
-    const char *sql = "INSERT INTO energy_data (timestamp, appliance_id, power_consumption, cumulative_energy) VALUES (?, ?, ?, ?);";
-    sqlite3_stmt *stmt;
+    const char *sql =
+        "INSERT INTO energy_data (timestamp, appliance_id, power_consumption, cumulative_energy, status) "
+        "VALUES (?, ?, ?, ?, ?);";
 
+    sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
     {
         fprintf(stderr, "SQL error (prepare): %s\n", sqlite3_errmsg(db));
@@ -42,6 +61,7 @@ bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy
     sqlite3_bind_int(stmt, 2, appliance_id);
     sqlite3_bind_double(stmt, 3, power);
     sqlite3_bind_double(stmt, 4, energy);
+    sqlite3_bind_text(stmt, 5, status, -1, SQLITE_STATIC);
 
     bool success = sqlite3_step(stmt) == SQLITE_DONE;
     if (!success)
@@ -53,26 +73,44 @@ bool insert_device_data(sqlite3 *db, int appliance_id, float power, float energy
     return success;
 }
 
+
 void insert_data(sqlite3 *db)
 {
     for (int idx = 0; idx < TOTAL_DEVICES; idx++)
     {
-        float power = (float)(rand() % 450);  // Simulated range, with error chance
+        float power = (float)(rand() % 450);  // Simulated range, includes possible disconnection
         float energy = power * 0.001f;
 
-        if (!is_sensor_connected(power))
+        if (is_sensor_connected(power) == OVER_CONSUMPTION)
         {
             fprintf(stderr, "Sensor %d disconnected: Power = %.2f W\n", idx, power);
+
+            if (insert_device_data(db, idx, -1.0f, -1.0f, "Over Consumption Device Turned off"))
+            {
+                printf("Logged sensor %d disconnection in database.\n", idx);
+            }
+            continue;
+        }
+        else if (is_sensor_connected(power) == DEVICE_DISCONNECTED)
+        {
+            fprintf(stderr, "Sensor %d disconnected: Power = %.2f W\n", idx, power);
+
+            if (insert_device_data(db, idx, -1.0f, -1.0f, "Device Not connected"))
+            {
+                printf("Logged sensor %d disconnection in database.\n", idx);
+            }
             continue;
         }
 
-        if (insert_device_data(db, idx, power, energy))
+        if (insert_device_data(db, idx, power, energy, "OK"))
         {
-            printf("Time: %s | Appliance: %d | Power: %.2f W | Energy: %.3f kWh\n",
+            printf("Time: %s | Appliance: %d | Power: %.2f W | Energy: %.3f kWh | Status: OK\n",
                    get_timestamp(), idx, power, energy);
         }
     }
 }
+
+
 
 bool send_data_to_server(const char *json)
 {
@@ -117,11 +155,12 @@ void fetch_and_send(sqlite3 *db)
 
         char entry[512];
         snprintf(entry, sizeof(entry),
-                 "{\"timestamp\":\"%s\",\"appliance_id\":%d,\"power_consumption\":%.2f,\"cumulative_energy\":%.3f}",
+                 "{\"timestamp\":\"%s\",\"appliance_id\":%d,\"power_consumption\":%.2f,\"cumulative_energy\":%.3f,\"status\":\"%s\"}",
                  sqlite3_column_text(stmt, 1),
                  sqlite3_column_int(stmt, 2),
                  sqlite3_column_double(stmt, 3),
-                 sqlite3_column_double(stmt, 4));
+                 sqlite3_column_double(stmt, 4),
+                 sqlite3_column_text(stmt, 5));
         strcat(json, entry);
     }
     strcat(json, "]");
