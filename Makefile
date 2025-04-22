@@ -7,6 +7,7 @@ QUERY_SRC = user_query/query_latest.c
 LOGGER_EXE = $(BUILD_DIR)/logger
 QUERY_EXE = $(BUILD_DIR)/query_latest
 SERVER_SCRIPT = server/server.py
+GUI_SCRIPT = user_query/query_latest_gui.py
 
 # Default target
 all: setup build
@@ -38,6 +39,9 @@ run_logger: run_server
 # Run query_latest
 query:
 	$(QUERY_EXE)
+
+run_gui:
+	python3 $(GUI_SCRIPT)
 
 # Clean build files
 clean:

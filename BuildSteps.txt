@@ -13,3 +13,4 @@ Execution
 1. python3 server/server.py
 2. ./.build/logger
 3. ./.build/query_latest
+4 python3 python3/query_latest_gui.py
